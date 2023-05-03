@@ -43,8 +43,7 @@
 #define REVISION		3
 #define RC				0
 
-#define	DEBUG			0						// Serial Debug Mode: 1 = enable
-#define SERIALKB		0						// Serial Keyboard: 1 = enable (Experimental)
+#define SERIALVDP       0
 
 fabgl::PS2Controller		PS2Controller;		// The keyboard class
 fabgl::Canvas *				Canvas;				// The canvas class
@@ -105,7 +104,7 @@ void setup() {
 	disableCore0WDT(); delay(200);								// Disable the watchdog timers
 	disableCore1WDT(); delay(200);
 	#if DEBUG == 1 || SERIALKB == 1
-	DBGSerial.begin(500000, SERIAL_8N1, 3, 1);
+	DBGSerial.begin(1152000, SERIAL_8N1, 3, 1);
 	#endif 
 	ESPSerial.end();
  	ESPSerial.setRxBufferSize(UART_RX_SIZE);					// Can't be called when running
@@ -157,7 +156,11 @@ void loop() {
         		do_cursor();
       		}
       		byte c = ESPSerial.read();
+			#if SERIALVDP
+			DBGSerial.write(c);
+			#else
       		vdu(c);
+			#endif
     	}
 		#if USE_HWFLOW == 0
 		else {
