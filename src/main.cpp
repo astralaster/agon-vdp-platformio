@@ -43,7 +43,7 @@
 #define REVISION		3
 #define RC				0
 
-#define SERIALVDP       0
+#define SERIALVDP       1
 
 fabgl::PS2Controller		PS2Controller;		// The keyboard class
 fabgl::Canvas *				Canvas;				// The canvas class
@@ -96,15 +96,15 @@ audio_channel *	audio_channels[AUDIO_CHANNELS];	// Storage for the channel data
 
 ESP32Time	rtc(0);								// The RTC
 
-#if DEBUG == 1 || SERIALKB == 1
+#if DEBUG == 1 || SERIALKB == 1 || SERIALVDP == 1
 HardwareSerial DBGSerial(0);
 #endif 
 
 void setup() {
 	disableCore0WDT(); delay(200);								// Disable the watchdog timers
 	disableCore1WDT(); delay(200);
-	#if DEBUG == 1 || SERIALKB == 1
-	DBGSerial.begin(1152000, SERIAL_8N1, 3, 1);
+	#if DEBUG == 1 || SERIALKB == 1 || SERIALVDP == 1
+	DBGSerial.begin(115200, SERIAL_8N1, 3, 1);
 	#endif 
 	ESPSerial.end();
  	ESPSerial.setRxBufferSize(UART_RX_SIZE);					// Can't be called when running
@@ -174,7 +174,7 @@ void loop() {
 // The boot screen
 //
 void boot_screen() {
-  	printFmt("Agon Quark VDP Version %d.%02d", VERSION, REVISION);
+  	printFmt("Agon Quark VDP Version %d.%02d VDP-SDL Testversion", VERSION, REVISION);
 	#if RC > 0
 	  	printFmt(" RC%d", RC);
 	#endif
@@ -302,6 +302,9 @@ void wait_eZ80() {
 			#endif 		
 			byte c = ESPSerial.read();	// Only handle VDU 23 packets
 			if(c == 23) {
+				#ifdef SERIALVDP
+				DBGSerial.write(c);
+				#endif
 				vdu_sys();
 			}
 		}
