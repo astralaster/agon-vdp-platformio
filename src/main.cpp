@@ -37,6 +37,7 @@
 #include "fabgl.h"
 #include "HardwareSerial.h"
 #include "ESP32Time.h"
+#include "agon_logo_low.h"
 
 #include "arduino_compat.h"
 #define VERSION			1
@@ -171,11 +172,45 @@ void loop() {
 // The boot screen
 //
 void boot_screen() {
-  	printFmt("Agon Quark VDP Version %d.%02d", VERSION, REVISION);
+	printFmt("\n\r");
+	printFmt("   Agon light - the black belt of 8 bits");
+	printFmt("\n\r");
+  	printFmt("   Agon Quark VDP Version %d.%02d", VERSION, REVISION);
 	#if RC > 0
 	  	printFmt(" RC%d", RC);
 	#endif
 	printFmt("\n\r");
+	printFmt("   ");
+	int width = agon_logo_width;
+	int height = agon_logo_height;
+	void* dataptr = (void *)heap_caps_malloc(sizeof(uint32_t)*width*height, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+	bitmaps[0] = Bitmap(width,height,dataptr,PixelFormat::RGBA8888);
+	bitmaps[0].dataAllocated = true;
+	unsigned char *data = header_data;
+	union {
+		uint32_t u32;
+		uint8_t u8[4];
+	} u;
+	for(int i = 0; i<width*height; ++i)
+	{
+		switch(data[i])
+		{
+			case LOGO_COLOR_BLACK:
+				u.u32 = 0;
+				break;
+			case LOGO_COLOR_WHITE:
+				u.u32 = UINT32_MAX;
+				break;
+			case LOGO_COLOR_GRAY:
+				u.u8[0] = 0x55;
+				u.u8[1] = 0x55;
+				u.u8[2] = 0x55;
+				u.u8[3] = 0xFF;
+				break;
+		}
+		((uint32_t*)dataptr)[i] = u.u32;
+	}
+	Canvas->drawBitmap(3,8,&bitmaps[0]);
 }
 
 // Debug printf to PC
