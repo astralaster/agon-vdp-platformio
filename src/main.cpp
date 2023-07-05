@@ -44,7 +44,7 @@
 #define REVISION		3
 #define RC				0
 
-#define	DEBUG			0						// Serial Debug Mode: 1 = enable
+#define	DEBUG			1						// Serial Debug Mode: 1 = enable
 #define SERIALKB		0						// Serial Keyboard: 1 = enable (Experimental)
 
 fabgl::PS2Controller		PS2Controller;		// The keyboard class
@@ -101,6 +101,96 @@ ESP32Time	rtc(0);								// The RTC
 #if DEBUG == 1 || SERIALKB == 1
 HardwareSerial DBGSerial(0);
 #endif 
+
+extern "C" {
+#include <inttypes.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+
+static int print_vdu(lua_State *L){
+	lua_len(L, 1);
+    size_t len = static_cast<size_t>(lua_tonumber(L, -1));
+	lua_pop(L, 1);
+	const char* cp = lua_tostring(L, 1);
+	while(len > 0) {
+		printf("%c", *cp);
+		vdu(*cp);
+		cp++;
+		len--;
+	}
+    return 0;
+}
+
+static int plot_pixel(lua_State *L){
+	int x = lua_tonumber(L, -3);
+	int y = lua_tonumber(L, -2);
+	int c = lua_tonumber(L, -1);
+	lua_pop(L, 3);
+	// gfg = colourLookup[palette[c%VGAColourDepth]];
+	// Canvas->setPenColor(gfg);
+	// Canvas->setPixel(x, y);
+	Canvas->setPixel(x, y, colourLookup[palette[c%VGAColourDepth]]);
+	return 0;
+}
+
+static char *loaded_prg = NULL;
+
+static int report(lua_State *L, int status)
+{
+    if (status != LUA_OK)
+    {
+        const char *msg = lua_tostring(L, -1);
+        lua_writestring(msg, strlen(msg));
+        lua_writeline();
+        lua_pop(L, 1); /* remove message */
+    }
+    return status;
+}
+
+void run_lua()
+{
+    printf("Start, heap: %" PRIu32 "\n", xPortGetFreeHeapSize());
+
+    lua_State *L = luaL_newstate();
+    if (!L)
+    {
+        printf("Could not create state....\n");
+        while (1) { vTaskDelay(1000); }
+    }
+
+    printf("State ready, heap: %" PRIu32 "\n", xPortGetFreeHeapSize());
+
+    luaL_openlibs(L);
+	lua_pushcfunction(L, print_vdu);
+	lua_setglobal(L, "print_vdu");
+	lua_pushcfunction(L, plot_pixel);
+	lua_setglobal(L, "plot_pixel");
+
+    printf("Libs ready, heap: %" PRIu32 "\n", xPortGetFreeHeapSize());
+
+    int r = luaL_loadstring(L, loaded_prg);
+    if (r)
+    {
+        report(L, r);
+        while (1) { vTaskDelay(1000); }
+    }
+
+    printf("Prg loaded, heap: %" PRIu32 "\n", xPortGetFreeHeapSize());
+
+    printf("-------------------------------------------\n");
+    r = lua_pcall(L, 0, 0, 0);
+    if (r)
+        report(L, r);
+    printf("-------------------------------------------\n");
+
+    printf("Prg done, heap: %" PRIu32 "\n", xPortGetFreeHeapSize());
+
+    lua_close(L);
+
+    printf("State closed, heap: %" PRIu32 "\n", xPortGetFreeHeapSize());
+}
+}
 
 void setup() {
 	disableCore0WDT(); delay(200);								// Disable the watchdog timers
@@ -1277,6 +1367,29 @@ void vdu_sys_video() {
 			int b = readByte_t();		// Set logical coord mode
 			if(b >= 0) {
 				logicalCoords = b;	
+			}
+		}	break;
+		case VDP_LUA: {					// VDU 23, 0, &D0, n
+			int16_t len = readWord_t();
+			if(loaded_prg == nullptr) {
+				free(loaded_prg);
+			}
+			loaded_prg = (char*)malloc(len+1);
+			if(loaded_prg == nullptr) {
+				printf("Error allocating memory for Lua program\n");
+				return;
+			}
+			for(int i = 0; i < len; i++) {
+				int8_t b = readByte_t();
+				loaded_prg[i] = b;
+			}
+			loaded_prg[len] = 0;
+			printf("Loaded Lua program of %d bytes\n", len);
+			printf("%s\n", loaded_prg);
+		}	break;
+		case VDP_LUA_RUN: {				// VDU 23, 0, &D1
+			if(loaded_prg != NULL) {
+				run_lua();
 			}
 		}	break;
 		case VDP_TERMINALMODE: {		// VDU 23, 0, &FF
