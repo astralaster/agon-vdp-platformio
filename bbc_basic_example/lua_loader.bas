@@ -12,7 +12,7 @@
   200 PRINT "Uploading the lua script"
   210 VDU 23,0,&D0,
   220 VDU L%;
-  230 FOR I%=1 TO L%
+  230 FOR I%=0 TO L%
   240   VDU ?(file+I%),
   250 NEXT
   300 PRINT "Start lua script"
