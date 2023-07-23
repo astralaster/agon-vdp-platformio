@@ -262,45 +262,43 @@ void loop() {
 // The boot screen
 //
 void boot_screen() {
-	printFmt("\n\r");
-	printFmt("   Agon light - the black belt of 8 bits");
-	printFmt("\n\r");
-  	printFmt("   Agon Quark VDP Version %d.%02d", VERSION, REVISION);
+	printFmt("\n\r ");
+	printFmt("\n\r ");
+	printFmt("        Agon light - the black belt of 8 bits");
+	printFmt("\n\r ");
+	printFmt("\n\r ");
+  	printFmt("        Agon Quark VDP Version %d.%02d with %s", VERSION, REVISION, LUA_RELEASE);
 	#if RC > 0
 	  	printFmt(" RC%d", RC);
 	#endif
-	printFmt("\n\r");
-	printFmt("   ");
+	printFmt("\n\r ");
+	printFmt("\n\r ");
+	printFmt("        ");
 	int width = agon_logo_width;
 	int height = agon_logo_height;
 	void* dataptr = (void *)heap_caps_malloc(sizeof(uint32_t)*width*height, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
 	bitmaps[0] = Bitmap(width,height,dataptr,PixelFormat::RGBA8888);
 	bitmaps[0].dataAllocated = true;
-	unsigned char *data = header_data;
+	char *data = header_data;
 	union {
 		uint32_t u32;
 		uint8_t u8[4];
 	} u;
+
+	char pixel[3];
+
 	for(int i = 0; i<width*height; ++i)
 	{
-		switch(data[i])
-		{
-			case LOGO_COLOR_BLACK:
-				u.u32 = 0;
-				break;
-			case LOGO_COLOR_WHITE:
-				u.u32 = UINT32_MAX;
-				break;
-			case LOGO_COLOR_GRAY:
-				u.u8[0] = 0x55;
-				u.u8[1] = 0x55;
-				u.u8[2] = 0x55;
-				u.u8[3] = 0xFF;
-				break;
-		}
+		HEADER_PIXEL(data, pixel);
+		u.u8[0] = pixel[0];
+		u.u8[1] = pixel[1];
+		u.u8[2] = pixel[2];
+		u.u8[3] = 0xFF;
 		((uint32_t*)dataptr)[i] = u.u32;
 	}
-	Canvas->drawBitmap(3,8,&bitmaps[0]);
+	Canvas->drawBitmap(0,4,&bitmaps[0]);
+	free(dataptr);
+	bitmaps[0].dataAllocated = false;
 }
 
 // Debug printf to PC
