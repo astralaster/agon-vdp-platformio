@@ -31,44 +31,6 @@ void VDUStreamProcessor::wait_eZ80() {
 		}
 	}
 	debug_log("wait_eZ80: End\n\r");
-
-	debug_log("try to update VDP...\n\r");
-	extern const uint8_t video_ino_bin_start[] asm("_binary_data_video_ino_bin_start");
-	extern const uint8_t video_ino_bin_end[] asm("_binary_data_video_ino_bin_end");
-
-	debug_log("start: %x end: %x\n\r", video_ino_bin_start, video_ino_bin_end);
-    esp_err_t err;
-    /* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
-    esp_ota_handle_t update_handle = 0 ;
-    const esp_partition_t *update_partition = NULL;
-    
-
-    const esp_partition_t *configured = esp_ota_get_boot_partition();
-    const esp_partition_t *running = esp_ota_get_running_partition();
-
-	update_partition = esp_ota_get_next_update_partition(NULL);
-    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
-    if (err != ESP_OK) {
-        debug_log("esp_ota_begin failed, error=%d", err);
-    }
-
-	size_t data_size = video_ino_bin_end - video_ino_bin_start;
-	err = esp_ota_write( update_handle, (const void *)video_ino_bin_start, data_size);
-	if (err != ESP_OK) {
-        debug_log("esp_ota_write failed, error=%d", err);
-    }
-
-    if (esp_ota_end(update_handle) != ESP_OK) {
-        debug_log("esp_ota_end failed!");
-    }
-
-	err = esp_ota_set_boot_partition(update_partition);
-    if (err != ESP_OK) {
-        debug_log("esp_ota_set_boot_partition failed! err=0x%x", err);
-    }
-	debug_log("restart!\n\r");
-    esp_restart();
-
 }
 
 // Handle SYS
@@ -174,6 +136,56 @@ void VDUStreamProcessor::vdu_sys_video() {
 		case VDP_SWITCHBUFFER: {		// VDU 23, 0, &C3
 			switchBuffer();
 		}	break;
+		case VDP_UPDATE: {
+			debug_log("try to update VDP...\n\r");
+			extern const uint8_t video_ino_bin_start[] asm("_binary_data_video_ino_bin_start");
+			extern const uint8_t video_ino_bin_end[] asm("_binary_data_video_ino_bin_end");
+
+			debug_log("start: %x end: %x\n\r", video_ino_bin_start, video_ino_bin_end);
+			esp_err_t err;
+			/* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
+			esp_ota_handle_t update_handle = 0 ;
+			const esp_partition_t *update_partition = NULL;
+			
+
+			const esp_partition_t *configured = esp_ota_get_boot_partition();
+			const esp_partition_t *running = esp_ota_get_running_partition();
+
+			update_partition = esp_ota_get_next_update_partition(NULL);
+			err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
+			if (err != ESP_OK) {
+				debug_log("esp_ota_begin failed, error=%d", err);
+			}
+
+			size_t data_size = video_ino_bin_end - video_ino_bin_start;
+			err = esp_ota_write( update_handle, (const void *)video_ino_bin_start, data_size);
+			if (err != ESP_OK) {
+				debug_log("esp_ota_write failed, error=%d", err);
+			}
+
+			if (esp_ota_end(update_handle) != ESP_OK) {
+				debug_log("esp_ota_end failed!");
+			}
+
+			err = esp_ota_set_boot_partition(update_partition);
+			if (err != ESP_OK) {
+				debug_log("esp_ota_set_boot_partition failed! err=0x%x", err);
+			}
+			debug_log("restart!\n\r");
+			esp_restart();
+		}
+		case VDP_SWITCH: {
+			esp_err_t err;
+			const esp_partition_t *running = esp_ota_get_running_partition();
+			const esp_partition_t *update_partition = esp_ota_get_next_update_partition(running);
+
+			err = esp_ota_set_boot_partition(update_partition);
+			if (err != ESP_OK) {
+				debug_log("esp_ota_set_boot_partition failed! err=0x%x", err);
+			}
+			debug_log("restart!\n\r");
+			esp_restart();
+		}
 		case VDP_TERMINALMODE: {		// VDU 23, 0, &FF
 			switchTerminalMode(); 		// Switch to terminal mode
 		}	break;
