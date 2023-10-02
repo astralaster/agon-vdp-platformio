@@ -163,7 +163,7 @@ void do_keyboard_terminal() {
 // The boot screen
 //
 void boot_screen() {
-	printFmt("Agon Quark VDP Version %d.%02d", VERSION, REVISION);
+	printFmt("Agon Quark VDP Version %d.%02d MASTER", VERSION, REVISION);
 	#if RC > 0
 		printFmt(" RC%d", RC);
 	#endif
