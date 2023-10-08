@@ -18,9 +18,30 @@ extern void switchTerminalMode();				// Switch to terminal mode
 bool			initialised = false;			// Is the system initialised yet?
 ESP32Time		rtc(0);							// The RTC
 
+// Buffer for serialised time
+//
+typedef union {
+	struct {
+		uint32_t month : 4;
+		uint32_t day : 5;
+		uint32_t dayOfWeek : 3;
+		uint32_t dayOfYear : 9;
+		uint32_t hour : 5;
+		uint32_t minute : 6;
+		uint8_t  second;
+		uint8_t  year;
+	};
+	uint8_t packet[6];
+} vdp_time_t;
+
 // Wait for eZ80 to initialise
 //
 void VDUStreamProcessor::wait_eZ80() {
+	if(esp_reset_reason() == ESP_RST_SW) {
+		printFmt("VDP firmware update successful!\n\r");
+		return;
+	}
+
 	debug_log("wait_eZ80: Start\n\r");
 	while (!initialised) {
 		if (byteAvailable()) {
@@ -67,6 +88,9 @@ void VDUStreamProcessor::vdu_sys() {
 			}	break;
 			case 0x1B: {					// VDU 23, 27
 				vdu_sys_sprites();			// Sprite system control
+			}	break;
+			case 0x1C: {					// VDU 23, 28
+				vdu_sys_hexload();
 			}	break;
 		}
 	}
@@ -137,41 +161,97 @@ void VDUStreamProcessor::vdu_sys_video() {
 			switchBuffer();
 		}	break;
 		case VDP_UPDATE: {
-			debug_log("try to update VDP...\n\r");
-			extern const uint8_t video_ino_bin_start[] asm("_binary_data_video_ino_bin_start");
-			extern const uint8_t video_ino_bin_end[] asm("_binary_data_video_ino_bin_end");
 
-			debug_log("start: %x end: %x\n\r", video_ino_bin_start, video_ino_bin_end);
+			uint32_t update_size = 0;
+			uint32_t bytes_remain = readIntoBuffer((uint8_t*)&update_size, sizeof(update_size) - 1); // -1 because its 24bits
+			if(bytes_remain) {
+				printFmt("Read size failed!\n\r");
+				break;
+			}
+  			
+			printFmt("Received update size: %u bytes\n\r", update_size);
+
+			printFmt("Receiving VDP firmware update");
+
+			uint32_t start = millis();
+
 			esp_err_t err;
-			/* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
 			esp_ota_handle_t update_handle = 0 ;
 			const esp_partition_t *update_partition = NULL;
-			
-
 			const esp_partition_t *configured = esp_ota_get_boot_partition();
 			const esp_partition_t *running = esp_ota_get_running_partition();
 
 			update_partition = esp_ota_get_next_update_partition(NULL);
 			err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
 			if (err != ESP_OK) {
-				debug_log("esp_ota_begin failed, error=%d", err);
+				printFmt("esp_ota_begin failed, error=%d\n\r", err);
 			}
 
-			size_t data_size = video_ino_bin_end - video_ino_bin_start;
-			err = esp_ota_write( update_handle, (const void *)video_ino_bin_start, data_size);
-			if (err != ESP_OK) {
-				debug_log("esp_ota_write failed, error=%d", err);
-			}
+			uint32_t remaining_bytes = update_size;
+			uint8_t code = 0;
+			const size_t buffer_size = 1024;
 
-			if (esp_ota_end(update_handle) != ESP_OK) {
-				debug_log("esp_ota_end failed!");
+			while(remaining_bytes > 0) {
+
+				size_t bytes_to_read = buffer_size;
+
+				if(remaining_bytes < buffer_size)
+				{
+					bytes_to_read = remaining_bytes;
+				}
+
+				uint8_t buffer[buffer_size];
+
+				bytes_remain = readIntoBuffer(buffer, bytes_to_read);
+				if(bytes_remain) {
+					printFmt("Read buffer failed at byte %u!\n\r", remaining_bytes);
+					break;
+				}
+
+				for(int i = 0; i < bytes_to_read; i++)
+				{
+					code += ((uint8_t*)buffer)[i];
+				}
+
+				err = esp_ota_write( update_handle, (const void *)buffer, bytes_to_read);
+				if (err != ESP_OK) {
+					printFmt("esp_ota_write failed, error=%d", err);
+					break;
+				}
+
+				print(".");
+				remaining_bytes -= bytes_to_read;
 			}
+			print("\n\r");
+			
+			uint32_t end = millis();
+			printFmt("Remaining bytes %u / %u\n\r", remaining_bytes, update_size);
+			printFmt("checksum: 0x%x\n\r", code);
+			printFmt("update done in %u ms\n\r", end - start);
+			printFmt("Bandwidth: %f kbit/s\n\r", update_size / (end - start) * 8.0f);
+			
+			// checksum check
+			uint8_t checksum_complement = readByte_b();
+			printFmt("checksum_complement: 0x%x\n\r", checksum_complement);
+			if(uint8_t(code + checksum_complement)) {
+				printFmt("checksum error!\n\r");
+				break;
+			}
+			printFmt("checksum ok!\n\r");
 
 			err = esp_ota_set_boot_partition(update_partition);
 			if (err != ESP_OK) {
-				debug_log("esp_ota_set_boot_partition failed! err=0x%x", err);
+				printFmt("esp_ota_set_boot_partition failed! err=0x%x\n\r", err);
+				break;
 			}
-			debug_log("restart!\n\r");
+
+			print("Rebooting in ");
+			for(int i = 3; i > 0; i--) {
+				printFmt("%d...", i);
+				delay(1000);
+			}
+			print("0!\n\r");
+			
 			esp_restart();
 		}
 		case VDP_SWITCH: {
@@ -181,7 +261,7 @@ void VDUStreamProcessor::vdu_sys_video() {
 
 			err = esp_ota_set_boot_partition(update_partition);
 			if (err != ESP_OK) {
-				debug_log("esp_ota_set_boot_partition failed! err=0x%x", err);
+				debug_log("esp_ota_set_boot_partition failed! err=0x%x\n\r", err);
 			}
 			debug_log("restart!\n\r");
 			esp_restart();
@@ -195,9 +275,13 @@ void VDUStreamProcessor::vdu_sys_video() {
 // VDU 23, 0, &80, <echo>: Send a general poll/echo byte back to MOS
 //
 void VDUStreamProcessor::sendGeneralPoll() {
-	auto b = readByte_b();
+	auto b = readByte_t();
+	if (b == -1) {
+		debug_log("sendGeneralPoll: Timeout\n\r");
+		return;
+	}
 	uint8_t packet[] = {
-		b,
+		(uint8_t) (b & 0xFF),
 	};
 	send_packet(PACKET_GP, sizeof packet, packet);
 	initialised = true;	
@@ -249,17 +333,18 @@ void VDUStreamProcessor::sendScreenPixel(uint16_t x, uint16_t y) {
 // VDU 23, 0, &87, 0: Send TIME information (from ESP32 RTC)
 //
 void VDUStreamProcessor::sendTime() {
-	uint8_t packet[] = {
-		(uint8_t) (rtc.getYear() - EPOCH_YEAR),	// 0 - 255
-		(uint8_t) rtc.getMonth(),			// 0 - 11
-		(uint8_t) rtc.getDay(),				// 1 - 31
-		rtc.getDayofYear(),		// 0 - 365 - TODO this is a bug as it won't fit in 8 bits
-		(uint8_t) rtc.getDayofWeek(),		// 0 - 6
-		(uint8_t) rtc.getHour(true),		// 0 - 23
-		(uint8_t) rtc.getMinute(),			// 0 - 59
-		(uint8_t) rtc.getSecond(),			// 0 - 59
-	};
-	send_packet(PACKET_RTC, sizeof packet, packet);
+	vdp_time_t	time;
+
+	time.year = rtc.getYear() - EPOCH_YEAR;	// 0 - 255
+	time.month = rtc.getMonth();			// 0 - 11
+	time.day = rtc.getDay();				// 1 - 31
+	time.dayOfYear = rtc.getDayofYear();	// 0 - 365
+	time.dayOfWeek = rtc.getDayofWeek();	// 0 - 6
+	time.hour = rtc.getHour(true);			// 0 - 23
+	time.minute = rtc.getMinute();			// 0 - 59
+	time.second = rtc.getSecond();			// 0 - 59
+
+	send_packet(PACKET_RTC, sizeof time.packet, time.packet);
 }
 
 // VDU 23, 0, &86: Send MODE information (screen details)
