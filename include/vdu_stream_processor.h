@@ -95,6 +95,11 @@ class VDUStreamProcessor {
 		bool setBufferByte(uint8_t value, uint16_t bufferId, uint32_t offset);
 		void bufferAdjust(uint16_t bufferId);
 		void bufferConditionalCall(uint16_t bufferId);
+
+		void vdu_sys_updater();
+		void switchFirmware();
+		void unlock();
+		void receiveFirmware();
 };
 
 // Read an unsigned byte from the serial port, with a timeout

@@ -3,7 +3,6 @@
 
 #include <fabgl.h>
 #include <ESP32Time.h>
-#include "esp_ota_ops.h"
 
 #include "agon.h"
 #include "agon_keyboard.h"
@@ -12,6 +11,7 @@
 #include "vdu_audio.h"
 #include "vdu_buffered.h"
 #include "vdu_sprites.h"
+#include "updater.h"
 
 extern void switchTerminalMode();				// Switch to terminal mode
 
@@ -92,6 +92,9 @@ void VDUStreamProcessor::vdu_sys() {
 			case 0x1C: {					// VDU 23, 28
 				vdu_sys_hexload();
 			}	break;
+			case 0x1D: {					// VDU 23, 29
+				vdu_sys_updater();
+			}	break;
 		}
 	}
 	//
@@ -160,112 +163,6 @@ void VDUStreamProcessor::vdu_sys_video() {
 		case VDP_SWITCHBUFFER: {		// VDU 23, 0, &C3
 			switchBuffer();
 		}	break;
-		case VDP_UPDATE: {
-
-			uint32_t update_size = 0;
-			uint32_t bytes_remain = readIntoBuffer((uint8_t*)&update_size, sizeof(update_size) - 1); // -1 because its 24bits
-			if(bytes_remain) {
-				printFmt("Read size failed!\n\r");
-				break;
-			}
-  			
-			printFmt("Received update size: %u bytes\n\r", update_size);
-
-			printFmt("Receiving VDP firmware update");
-
-			uint32_t start = millis();
-
-			esp_err_t err;
-			esp_ota_handle_t update_handle = 0 ;
-			const esp_partition_t *update_partition = NULL;
-			const esp_partition_t *configured = esp_ota_get_boot_partition();
-			const esp_partition_t *running = esp_ota_get_running_partition();
-
-			update_partition = esp_ota_get_next_update_partition(NULL);
-			err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
-			if (err != ESP_OK) {
-				printFmt("esp_ota_begin failed, error=%d\n\r", err);
-			}
-
-			uint32_t remaining_bytes = update_size;
-			uint8_t code = 0;
-			const size_t buffer_size = 1024;
-
-			while(remaining_bytes > 0) {
-
-				size_t bytes_to_read = buffer_size;
-
-				if(remaining_bytes < buffer_size)
-				{
-					bytes_to_read = remaining_bytes;
-				}
-
-				uint8_t buffer[buffer_size];
-
-				bytes_remain = readIntoBuffer(buffer, bytes_to_read);
-				if(bytes_remain) {
-					printFmt("Read buffer failed at byte %u!\n\r", remaining_bytes);
-					break;
-				}
-
-				for(int i = 0; i < bytes_to_read; i++)
-				{
-					code += ((uint8_t*)buffer)[i];
-				}
-
-				err = esp_ota_write( update_handle, (const void *)buffer, bytes_to_read);
-				if (err != ESP_OK) {
-					printFmt("esp_ota_write failed, error=%d", err);
-					break;
-				}
-
-				print(".");
-				remaining_bytes -= bytes_to_read;
-			}
-			print("\n\r");
-			
-			uint32_t end = millis();
-			printFmt("Remaining bytes %u / %u\n\r", remaining_bytes, update_size);
-			printFmt("checksum: 0x%x\n\r", code);
-			printFmt("update done in %u ms\n\r", end - start);
-			printFmt("Bandwidth: %f kbit/s\n\r", update_size / (end - start) * 8.0f);
-			
-			// checksum check
-			uint8_t checksum_complement = readByte_b();
-			printFmt("checksum_complement: 0x%x\n\r", checksum_complement);
-			if(uint8_t(code + checksum_complement)) {
-				printFmt("checksum error!\n\r");
-				break;
-			}
-			printFmt("checksum ok!\n\r");
-
-			err = esp_ota_set_boot_partition(update_partition);
-			if (err != ESP_OK) {
-				printFmt("esp_ota_set_boot_partition failed! err=0x%x\n\r", err);
-				break;
-			}
-
-			print("Rebooting in ");
-			for(int i = 3; i > 0; i--) {
-				printFmt("%d...", i);
-				delay(1000);
-			}
-			print("0!\n\r");
-			
-			esp_restart();
-		}
-		case VDP_SWITCH: {
-			esp_err_t err;
-			const esp_partition_t *running = esp_ota_get_running_partition();
-			const esp_partition_t *update_partition = esp_ota_get_next_update_partition(running);
-
-			err = esp_ota_set_boot_partition(update_partition);
-			if (err != ESP_OK) {
-				debug_log("esp_ota_set_boot_partition failed! err=0x%x\n\r", err);
-			}
-			debug_log("restart!\n\r");
-			esp_restart();
-		}
 		case VDP_TERMINALMODE: {		// VDU 23, 0, &FF
 			switchTerminalMode(); 		// Switch to terminal mode
 		}	break;
@@ -457,5 +354,7 @@ void VDUStreamProcessor::vdu_sys_udg(char c) {
 
 	redefineCharacter(c, buffer);
 }
+
+
 
 #endif // VDU_SYS_H
